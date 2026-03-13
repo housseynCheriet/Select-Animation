@@ -1,0 +1,22 @@
+{
+  "name": "select-animation",
+  "version": "1.1.2",
+  "description": "High-performance JavaScript animation engine for organic & fluid motion",
+  "main": "select-animation.js",  
+  "scripts": {
+    "build": "" 
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/housseynCheriet/Select-Animation"
+  },
+  "keywords": [
+    "animation",
+    "javascript",
+    "ui",
+    "svg",
+    "performance"
+  ],
+  "author": "Housseyn Cheriet",
+  "license": "MIT"
+}

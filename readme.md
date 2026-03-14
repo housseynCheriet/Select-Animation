@@ -42,7 +42,7 @@ npm install select-animation
 Include the script directly:
 
 ```html
-<script src="https://unpkg.com/select-animation/index.js"></script>
+<script src="https://unpkg.com/select-animation/select-animation.js"></script>
 ```
 
 or via CDN if available.
@@ -50,7 +50,7 @@ or via CDN if available.
 ### Usage with ES Modules:
 
 ```javascript
-import "select-animation";
+import { animate, selectDom } from 'select-animation';
 ```
 
 ---
@@ -58,15 +58,16 @@ import "select-animation";
 # 🚀 Basic Example
 
 ```javascript
-const element = document.querySelector(".box");
+const element = document.querySelectorAll(".box");
+//or const element = selectDom(".box","div",......);
 
-animate({
+animate(element,{
     property: ["left", "opacity"], // Properties to animate
     from: 0,                        // Starting values
     to: 300,                        // Ending values
     duration: 1000,                 // Duration in milliseconds
     typeAnimation: "bounceout"      // Easing type
-})(element);
+})();
 ```
 
 ---

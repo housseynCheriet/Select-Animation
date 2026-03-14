@@ -7,712 +7,731 @@
  * License: MIT
  * ------------------------------------------------------------------------- */
 
-(function (global) {
-  "use strict"; // Enable strict mode for safer JavaScript execution
 
-  /* -------------------------------------------------
-     RequestAnimationFrame Polyfill for cross-browser support
-     ------------------------------------------------- */
-  let lastFrameTime = 0;
-  const vendorPrefixes = ["ms", "moz", "webkit", "o"];
+ (function (global) {
+    "use strict";
 
-  // Polyfill requestAnimationFrame
-  for (let i = 0; i < vendorPrefixes.length && !window.requestAnimationFrame; ++i) {
-    window.requestAnimationFrame = window[vendorPrefixes[i] + "RequestAnimationFrame"];
-    window.cancelAnimationFrame =
-      window[vendorPrefixes[i] + "CancelAnimationFrame"] ||
-      window[vendorPrefixes[i] + "CancelRequestAnimationFrame"];
-  }
-  if (!window.requestAnimationFrame) {
-    window.requestAnimationFrame = function (callback) {
-      const currentTime = Date.now();
-      const timeToCall = Math.max(0, 16 - (currentTime - lastFrameTime));
-      const id = window.setTimeout(() => {
-        callback(currentTime + timeToCall);
-      }, timeToCall);
-      lastFrameTime = currentTime + timeToCall;
-      return id;
-    };
-  }
-  if (!window.cancelAnimationFrame) {
-    window.cancelAnimationFrame = function (id) {
-      clearTimeout(id);
-    };
-  }
-
-  /* -------------------------------------------------
-     Default color properties used for color transformations
-     ------------------------------------------------- */
-  const defaultColorProps = {
-    red: 255,
-    green: 255,
-    blue: 255,
-    alpha: 1
-  };
-
-  const colorProperties = {
-    color: defaultColorProps,
-    background: defaultColorProps,
-    backgroundColor: defaultColorProps,
-    borderColor: defaultColorProps
-  };
-
-  /* -------------------------------------------------
-     Map of CSS property placeholders for transformations
-     ------------------------------------------------- */
-  const styleMap = {
-    zIndex: "*",
-    left: "*px",
-    top: "*px",
-    bottom: "*px",
-    right: "*px",
-    width: "*px",
-    height: "*px",
-    minWidth: "*px",
-    minHeight: "*px",
-    maxWidth: "*px",
-    maxHeight: "*px",
-    padding: "*px",
-    margin: "*px",
-    borderRadius: "*%",
-    borderWidth: "*px",
-    borderTopWidth: "*px",
-    borderRightWidth: "*px",
-    borderBottomWidth: "*px",
-    borderLeftWidth: "*px",
-    borderImageWidth: "*px",
-    strokeWidth: "*px",
-    strokeHeight: "*px",
-    strokeOpacity: "*",
-    opacity: "*",
-    translateX: "translateX(*px)",
-    translateY: "translateY(*px)",
-    translateZ: "translateZ(*px)",
-    rotateX: "rotateX(*deg)",
-    rotateY: "rotateY(*deg)",
-    rotateZ: "rotateZ(*deg)",
-    scale: "scale(*)",
-    scaleX: "scaleX(*)",
-    scaleY: "scaleY(*)",
-    skewX: "skewX(*deg)",
-    skewY: "skewY(*deg)",
-    rgbR: "rgba(*,",
-    rgbG: "*,",
-    rgbB: "*,",
-    rgba: "rgba(rgbR,rgbG,rgbB,rgbA)" // Final RGBA string placeholder
-  };
-
-  /* -------------------------------------------------
-     Utility function: Select DOM elements matching multiple selectors
-     ------------------------------------------------- */
-  global.selectDom = function (...selectors) {
-    let elements = [];
-    selectors.forEach((selector) => {
-      const nodeList = document.querySelectorAll(selector);
-      elements.push(...nodeList);
-    });
-    return elements;
-  };
-
-  /* -------------------------------------------------
-     Core Animation Engine
-     Accepts a flexible set of arguments defining animations
-     Returns a function to initiate the animation
-     ------------------------------------------------- */
-  global.animate = function () {
-    // Clone arguments for internal manipulation
-    const args = Array.prototype.slice.call(arguments);
-    const argsCopy = copyObject(args);
-
-    // Return a function that executes the animation on given elements
-    return function (elements, eventConfig, nextArgs) {
-      let targetElements = [];
-      let tempArgs = argsCopy;
-
-      // Initialize variables for animation
-      let currentTarget, fromValues, toValues, elementIndex, delay, animationDescriptor;
-      let isNextGroup = false; // Flag for chaining groups of elements
-      const animationData = {
-        color: {},
-        transform: {},
-        from: {},
-        to: {}
-      };
-
-      // Parse and prepare arguments
-      parseArguments();
-
-      /**
-       * Parses the passed arguments to identify target elements,
-       * animation descriptors, and setup necessary data structures.
-       */
-      function parseArguments() {
-        if (elements !== undefined) {
-          if (!Array.isArray(elements)) {
-            elements = [elements];
-          }
-          targetElements = elements;
-        }
-
-        let secondLoopFlag = false;
-        for (let index = 0, totalArgs = args.length; index < totalArgs; index++) {
-          fromValues = 0;
-          // Detect "next group" of elements for chaining
-          if (isNextGroup || Array.isArray(argsCopy[index]) || isDOMElement(argsCopy[index])) {
-            if (secondLoopFlag) {
-              if (!Array.isArray(argsCopy[index])) {
-                argsCopy[index] = [argsCopy[index]];
-              }
-              Array.prototype.push.apply(targetElements, argsCopy[index]);
-            }
-            isNextGroup = false;
-          } else if (typeof argsCopy[index] === "object" && argsCopy[index] !== null) {
-            if (secondLoopFlag) {
-              // Handle second pass: resolve non-numeric values and callbacks
-              if (index === 0) {
-                for (let u = 0; u < elements.length; u++) {
-                  if (typeof elements[u] !== "number") targetElements.push(elements[u]);
-                }
-              }
-              if (elements !== undefined) {
-                for (let j = 0; j < targetElements.length; j++) {
-                  if (typeof targetElements[j] !== "number") {
-                    // Check for event-based callback
-                    let eventResult = checkEventValue(nextArgs, eventConfig, currentTarget, targetElements[j + 1]);
-                    if (eventResult[0]) eventConfig = eventResult[0];
-                    bindEvent(targetElements[j], getObjectAt(targetElements, args, argsCopy, index), eventResult[1]);
-                  }
-                }
-              } else {
-                executeChain(targetElements, args, argsCopy, index)();
-              }
-            } else {
-              isNextGroup = false;
-              // Handle from/to objects for color and transform properties
-              const isFromObject = typeof argsCopy[index].from === "object";
-              const isToObject = typeof argsCopy[index].to === "object";
-
-              // Handle special animation types
-              if (argsCopy[index].typeAnimation === "vibration" && argsCopy[index].vibrationStep === undefined) {
-                argsCopy[index].vibrationStep = 6;
-              } else {
-                const bezierParams = getNumberFromString(argsCopy[index].typeAnimation);
-                if (bezierParams && bezierParams.length === 4) {
-                  argsCopy[index].cubicbezier = bezierParams;
-                  argsCopy[index].typeAnimation = "cubicbezier";
-                }
-              }
-
-              // Default loop behavior
-              if (argsCopy[index].loop && argsCopy[index].loopType === undefined) {
-                argsCopy[index].loopType = "return";
-              }
-
-              // Normalize property list
-              if (
-                !argsCopy[index].callback &&
-                (Array.isArray(argsCopy[index].property) ||
-                  (argsCopy[index].property !== undefined && (argsCopy[index].property = [argsCopy[index].property])))
-              ) {
-                argsCopy[index].property.forEach(function (propertyItem) {
-                  // Resolve from/to values per property
-                  if (!isFromObject) fromValues = argsCopy[index].from;
-                  else fromY = argsCopy[index]["from"][elementIndex];
-
-                  if (!isToObject) toValues = argsCopy[index].to;
-                  else toY = argsCopy[index]["to"][elementIndex];
-
-                  if (typeof propertyItem === "object") {
-                    // Handle property objects like { transform: ["scaleX", "rotateZ"] }
-                    const propertyKey = Object.keys(propertyItem)[0];
-                    if (!Array.isArray(propertyItem[propertyKey])) {
-                      propertyItem[propertyKey] = [propertyItem[propertyKey]];
-                    }
-
-                    if (
-                      propertyKey.toLowerCase().includes("color") &&
-                      (animationData.color[propertyKey] = colorProperties[propertyKey])
-                    ) {
-                      // Initialize color properties
-                      fromValues["from"][propertyKey] = {};
-                      toValues["to"][propertyKey] = {};
-
-                      propertyItem[propertyKey].forEach(function (subProp) {
-                        // Initialize sub-properties
-                        if (propertyKey.toLowerCase() === "transform") {
-                          animationData.transform[subProp] = 0;
-                        } else {
-                          animationData.color[propertyKey][subProp] = 0;
-                        }
-
-                        // Populate from-values
-                        if (isFromObject) {
-                          if (fromY[propertyKey] !== undefined) {
-                            if (typeof fromY[propertyKey] === "number") {
-                              fromValues["from"][propertyKey][subProp] = fromY[propertyKey];
-                            } else if (Array.isArray(fromY[propertyKey])) {
-                              fromValues["from"][propertyKey][subProp] = fromY[propertyKey][elementIndex] !== undefined ? fromY[propertyKey][elementIndex] : fromValues["from"][propertyKey][subProp];
-                            } else if (fromY[propertyKey][subProp] !== undefined) {
-                              fromValues["from"][propertyKey][subProp] = fromY[propertyKey][subProp];
-                            }
-                          } else {
-                            fromValues["from"][propertyKey][subProp] = argsCopy[index].from;
-                          }
-                        } else {
-                          fromValues["from"][propertyKey][subProp] = argsCopy[index].from;
-                        }
-
-                        // Populate to-values
-                        if (isToObject) {
-                          if (toY[propertyKey] !== undefined) {
-                            if (typeof toY[propertyKey] === "number") {
-                              toValues["to"][propertyKey][subProp] = toY[propertyKey];
-                            } else if (Array.isArray(toY[propertyKey])) {
-                              toValues["to"][propertyKey][subProp] = toY[propertyKey][elementIndex] !== undefined ? toY[propertyKey][elementIndex] : toValues["to"][propertyKey][subProp];
-                            } else if (toY[propertyKey][subProp] !== undefined) {
-                              toValues["to"][propertyKey][subProp] = toY[propertyKey][subProp];
-                            }
-                          } else {
-                            toValues["to"][propertyKey][subProp] = argsCopy[index].to;
-                          }
-                        } else {
-                          toValues["to"][propertyKey][subProp] = argsCopy[index].to;
-                        }
-                        elementIndex++;
-                      });
-                      elementIndex++;
-                      y++;
-                    }
-                  } else {
-                    // Handle simple properties like "opacity"
-                    if (isFromObject) {
-                      fromValues["from"][propertyItem] = fromY[propertyItem] !== undefined ? fromY[propertyItem] : fromY !== undefined ? fromY : fromValues["from"][propertyItem];
-                    } else {
-                      fromValues["from"][propertyItem] = argsCopy[index].from;
-                    }
-                    if (isToObject) {
-                      toValues["to"][propertyItem] = toY[propertyItem] !== undefined ? toY[propertyItem] : toY !== undefined ? toY : toValues["to"][propertyItem];
-                    } else {
-                      toValues["to"][propertyItem] = argsCopy[index].to;
-                    }
-                    y++;
-                  }
-                });
-              }
-
-              // Save deep copy of the animation values for future reference
-              argsCopy[index].storedAnimationValues = copyObject(animationData);
-              // Reset animation data for next iteration
-              animationData.color = {};
-              animationData.transform = {};
-              animationData.from = {};
-              animationData.to = {};
-            }
-
-            // Detect if next argument is a list of elements for chaining
-            if (
-              args[index + 1] !== undefined &&
-              (Array.isArray(args[index + 1]) || isDOMElement(args[index + 1]))
-            ) {
-              isNextGroup = true;
-              targetElements = [];
-            }
-          }
-
-          // Restart loop for second pass if needed
-          if (index === totalArgs - 1 && !secondLoopFlag) {
-            isNextGroup = false;
-            secondLoopFlag = true;
-            index = -1; // restart loop
-          }
-        }
-      }
-
-      /**
-       * Helper to execute a specific animation descriptor on a set of elements.
-       * Returns a function that runs the animation.
-       */
-      function executeChain(targets, timelineSpecs, descriptorSpecs, descriptorIndex) {
-        const descriptor = timelineSpecs[descriptorIndex];
-        const animationType = descriptorSpecs[descriptorIndex].typeAnimation;
-        let currentAnimationType = animationType;
-
-        // Normalize timing properties
-        descriptor.timeline = !isNaN(Number(descriptor.timeline)) ? Number(descriptor.timeline) : 0;
-        descriptor.startafter = !isNaN(Number(descriptor.startafter)) ? Number(descriptor.startafter) : 0;
-
-        // Handle looping specifics
-        if (descriptor.boucle) {
-          descriptor.delay = !isNaN(Number(descriptor.delay)) ? Number(descriptor.delay) : undefined;
-          if (descriptor.boucleType === "returnRepeat" || descriptor.boucleType === "repeatReturn") {
-            // Use reverse easing for looping
-            currentAnimationType = Easing[animationType][1];
-          }
-        }
-
-        // Return the animation runner function
-        return function runAnimation() {
-          let pauseStartTime = 0;
-          let isPaused = false;
-          let pauseTimestamp;
-
-          // Setup pause/resume based on user events if specified
-          if (descriptor.pause && Array.isArray(descriptor.pause)) {
-            const [eventSelector, eventOptions] = descriptor.pause;
-            const [eventName, useCaptureFlag] = (eventOptions || "e:click|false").split('|');
-            const capture = useCaptureFlag === 'true';
-
-            // Toggle pause/resume on specified event
-            const togglePause = () => {
-              if (isPaused) {
-                isPaused = false;
-                descriptor.pausedDuration += Date.now() - pauseTimestamp;
-              } else {
-                isPaused = true;
-                pauseTimestamp = Date.now();
-              }
-            };
-
-            // Attach event listeners to target elements
-            document.querySelectorAll(eventSelector).forEach((el) => {
-              el.addEventListener(eventName, togglePause, capture);
-            });
-          }
-
-          const startTime = Date.now();
-
-          // Initialize per-element stored states for transforms and colors
-          targets.forEach((element, index) => {
-            if (!element.storedTransform) element.storedTransform = copyObject(descriptorSpecs[descriptorIndex].storedAnimationValues.transform);
-            if (!element.storedColor) {
-              element.storedColor = copyObject(descriptorSpecs[descriptorIndex].storedAnimationValues.color);
-            } else {
-              // Preserve previously stored color properties
-              Object.keys(descriptorSpecs[descriptorIndex].storedAnimationValues.color).forEach((key) => {
-                if (!element.storedColor[key]) element.storedColor[key] = descriptorSpecs[descriptorIndex].storedAnimationValues.color[key];
-              });
-            }
-
-            // Handle staggered start via timeline
-            if (descriptor.timeline !== 0) {
-              applyDelay([element], index, descriptor.timeline * index + descriptor.startafter, descriptor.startafter);
-            }
-          });
-
-          // If no timeline delay, start immediately
-          if (descriptor.timeline === 0) {
-            applyDelay(targets, 0, 0 + descriptor.startafter, descriptor.startafter);
-          }
-
-          /**
-           * Core animation frame loop for a group of elements.
-           */
-          function runFrame(targets, index, delayOffset, startDelay) {
-            if (descriptor.animFrame) cancelAnimationFrame(descriptor.animFrame[index]);
-            else descriptor.animFrame = {};
-
-            const descriptorClone = copyObject(descriptorSpecs[descriptorIndex]);
-            descriptorClone.changeTypeAnim = descriptorClone.typeAnimation;
-            descriptorClone.skipCount = 0;
-            descriptorClone.skipCount2 = 0;
-
-            let currentTime;
-            const storedValues = descriptorClone.storedAnimationValues;
-
-            /**
-             * Recursive function called on each frame
-             */
-            function frame() {
-              if (isPaused) {
-                descriptorClone.animFrame[index] = requestAnimationFrame(frame);
-                return;
-              }
-
-              const elapsedTime = Date.now() - (startTime + delayOffset + descriptor.pausedDuration);
-              let delay = 0;
-              let interpolatedValue, easedValue, styleString;
-
-              if (elapsedTime >= 0) {
-                // Loop handling (boucle)
-                if (descriptorClone.boucle) {
-                  handleLooping(elapsedTime, descriptorClone);
-                } else {
-                  // Clamp to duration for non-looping animations
-                  descriptorClone.timeEasing = Math.min(elapsedTime, descriptorClone.duration);
-                }
-
-                // Apply easing
-                if (!descriptorClone.skipDelay || descriptorClone.skip) {
-                  easedValue = Easing[descriptorClone.changeTypeAnim][0](descriptorClone.timeEasing, 0, 1, descriptorClone.duration, descriptorClone, index);
-
-                  // Call user callback if provided
-                  if (descriptorClone.callback) {
-                    targets.forEach((el, idx) => {
-                      descriptorClone.callback(el, easedValue, descriptorClone, idx !== index ? index : idx);
-                    });
-                  } else {
-                    // Default property updates
-                    descriptorClone.property.forEach((property) => {
-                      styleString = "";
-                      const propertyKey = typeof property === "string" ? property : Object.keys(property)[0];
-
-                      if (
-                        propertyKey.toLowerCase().includes("transform") &&
-                        storedValues[propertyKey] != null
-                      ) {
-                        // Handle transform properties
-                        property.transform.forEach((transformProp) => {
-                          interpolatedValue = storedValues["from"][propertyKey][transformProp] +
-                            easedValue * (storedValues["to"][propertyKey][transformProp] - storedValues["from"][propertyKey][transformProp]);
-                          targets.forEach((el) => {
-                            el.storedTransform[transformProp] = interpolatedValue;
-                          });
-                        });
-                        // Apply transform style
-                        targets.forEach((el) => {
-                          Object.keys(el.storedTransform).forEach((key) => {
-                            styleString += " " + styleMap[key].replace("*", el.storedTransform[key]);
-                          });
-                          el.style.transform = styleString;
-                        });
-                      } else if (
-                        propertyKey.toLowerCase().includes("color") &&
-                        storedValues.color != null
-                      ) {
-                        // Handle color properties
-                        targets.forEach((el) => {
-                          property[pKey].forEach((subProp) => {
-                            interpolatedValue = storedValues["from"][propertyKey][subProp] +
-                              easedValue * (storedValues["to"][propertyKey][subProp] - storedValues["from"][propertyKey][subProp]);
-                            el.storedColor[propertyKey][subProp] = interpolatedValue;
-                          });
-                          let colorStr = styleMap.rgba;
-                          for (const colorKey in defaultColorProps) {
-                            colorStr = colorStr.replace(new RegExp(colorKey, "g"), el.storedColor[propertyKey][colorKey]);
-                          }
-                          el.style[propertyKey] = colorStr;
-                        });
-                      } else {
-                        // Handle numeric properties like width, opacity
-                        const fromVal = storedValues["from"][propertyKey];
-                        const toVal = storedValues["to"][propertyKey];
-                        styleString = (descriptorClone.px === "%" ? styleMap[propertyKey].replace("px", "%") : styleMap[propertyKey])
-                          .replace("*", fromVal + easedValue * (toVal - fromVal));
-                        targets.forEach((el) => (el.style[propertyKey] = styleString));
-                      }
-                    });
-                  }
-                }
-              }
-
-              // Continue animation if within duration or looping
-              if (descriptorClone.boucle || elapsedTime < descriptorClone.duration) {
-                descriptorClone.animFrame[index] = requestAnimationFrame(frame);
-              }
-            }
-            frame(); // Start the frame loop
-          }
-        };
-      }
-
-      /**
-       * Handles looping behavior, including reverse and repeat modes
-       */
-      function handleLooping(elapsedTime, descriptorClone) {
-        // Loop handling logic (e.g., reversing direction, delays)
-        // Implement as needed based on your specific looping requirements
-      }
-
-      /**
-       * Helper to apply delay before starting animation
-       */
-      function applyDelay(elements, index, delayTime, startAfter) {
-        // Implement delay logic if needed
-      }
-
-      /**
-       * Utility to check if a value is a DOM element
-       */
-      function isDOMElement(value) {
-        return value instanceof Element || value instanceof Document;
-      }
-
-      /**
-       * Utility to get object at specific index in array or element
-       */
-      function getObjectAt(array, args, argsCopy, index) {
-        return array[index];
-      }
-
-      /**
-       * Utility for deep object copying
-       */
-      function copyObject(obj) {
-        if (obj === null || typeof obj !== "object") return obj;
-        if (Array.isArray(obj)) {
-          return obj.map(copyObject);
-        }
-        const copy = {};
-        for (const key in obj) {
-          if (Object.prototype.hasOwnProperty.call(obj, key)) {
-            copy[key] = copyObject(obj[key]);
-          }
-        }
-        return copy;
-      }
-
-      /**
-       * Checks and binds events for pause/resume
-       */
-      function bindEvent(element, eventName, callback) {
-        // Implementation for attaching event listeners
-      }
-
-      /**
-       * Checks event-related values in arguments
-       */
-      function checkEventValue(nextArgs, eventConfig, target, value) {
-        // Implementation for event value checking
-        return [null, null]; // Placeholder
-      }
-
-      /**
-       * Extracts numeric parameters from a string (e.g., cubic-bezier)
-       */
-      function getNumberFromString(str) {
-        return str.match(/[+-]?\d+(\.\d+)?/g);
-      }
-    };
-  };
-
-  /* -------------------------------------------------
-     Easing functions dictionary
-     Each easing has a primary function and optional reverse
-     ------------------------------------------------- */
-
-  const Easing = {
-    linear: [function(e, n, t, a) { return t * e / a + n }, "linear"],
-    quadin: [function(e, n, t, a) { return t * (e /= a) * e + n }, "quadout"],
-    quadout: [function(e, n, t, a) { return -t * (e /= a) * (e - 2) + n }, "quadin"],
-    quadinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e + n : -t / 2 * (--e * (e - 2) - 1) + n }, "quadoutin"],
-    quadoutin: [function(e, n, t, a) {
-        let p = e / a, p0;
-        if (p < 0.5) {
-            p0 = 1 - 2 * p;
-            return t * (0.5 * (1 - (p0 * p0))) + n;
-        } else {
-            p0 = p * 2 - 1;
-            return t * (0.5 * (p0 * p0) + 0.5) + n;
-        }
-    }, "quadinout"],
-    cubicin: [function(e, n, t, a) { return t * (e /= a) * e * e + n }, "cubicout"],
-    cubicout: [function(e, n, t, a) { return t * ((e = e / a - 1) * e * e + 1) + n }, "cubicin"],
-    cubicinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e * e + n : t / 2 * ((e -= 2) * e * e + 2) + n }, "cubicoutin"],
-    cubicoutin: [function(e, n, t, a) {
-        let p = e / a, p0;
-        if (p < 0.5) {
-            p0 = 1 - 2 * p;
-            return t * (0.5 * (1 - (p0 * p0 * p0))) + n;
-        } else {
-            p0 = p * 2 - 1;
-            return t * (0.5 * (p0 * p0 * p0) + 0.5) + n;
-        }
-    }, "cubicinout"],
-    // ... (other easing definitions omitted for brevity)
-    vibration: [function(e, n, t, a, c) {
-        // Oscillates between start and end values with a configurable step count
-        return n + (t - n) / 2 + Math.sin(e * Math.PI / (a / c.vibrationStep) + 3 * Math.PI / 2) * (t - n) / 2
-    }, "vibration"],
-    cubicbezier: [function(e, n, t, a, c, idx) {
-        // IMPROVEMENT: The cubic‑bezier implementation contains a syntax error.
-        // The variable for the second control point (`o`) is missing a name.
-        // Fix by declaring `let o = Number(q * c.cubicbezier[2] + qq);` before using it.
-        let q = 1, qq = 0, sol;
-        if (c.impair && (c.boucleType === "returnRepeat" || c.boucleType === "repeatReturn")) {
-            q = -1; qq = 1;
-        }
-        let b = e / a, r = 1 - b,
-            l = Number(q * c.cubicbezier[0] + qq),
-            o = Number(q * c.cubicbezier[2] + qq); // <-- fixed declaration
-
-        // Solve cubic equation to get the correct parameter `b` on the bezier curve
-        if ((sol = solveCubic(3 * l - 3 * o + 1, 0 - 6 * l + 3 * o, 3 * l, 0 - b))) {
-            b = sol;
-            r = 1 - b;
-        }
-        // Compute Bezier output (standard cubic Bézier formula)
-        const y = (r = 1 - b) * r * r * 0 +
-            3 * r * r * b * Number(q * c.cubicbezier[1] + qq) +
-            3 * r * b * b * Number(q * c.cubicbezier[3] + qq) +
-            b * b * b * 1;
-        return n + y * t;
-    }, "cubicbezier"]
-};
- 
-  /**
-   * Solves cubic equations for cubic-bezier calculations
-   */
-  function solveCubic(a, b, c, d) {
-    // Implementation of cubic solver
-    // Returns root in [0,1] if exists
-  }
-
-  /**
-   * Computes cubic root safely
-   */
-  function cubeRoot(value) {
-    const absVal = Math.pow(Math.abs(value), 1 / 3);
-    return value < 0 ? -absVal : absVal;
-  }
-
-  /**
-   * Extracts numeric values from a string
-   */
-  function getNumberFromString(str) {
-    return str.match(/[+-]?\d+(\.\d+)?/g);
-  }
-
-  /**
-   * Gets the computed style of an element for a given property
-   */
-  function getStyle(element, property) {
-    if (element.currentStyle) return element.currentStyle[property];
-    if (window.getComputedStyle) return window.getComputedStyle(element, null)[property];
-    return element.style[property];
-  }
-
-  /**
-   * Checks whether a value is a DOM Element or Document
-   */
-  function isDOMElement(value) {
-    return value instanceof Element || value instanceof Document;
-  }
-
-  /**
-   * Deep clone utility for objects and arrays
-   */
-  function copyObject(obj) {
-    if (obj === null || typeof obj !== "object") return obj;
-    if (Array.isArray(obj)) return obj.map(copyObject);
-    const clone = {};
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        clone[key] = copyObject(obj[key]);
-      }
+    // -----------------------------
+    // requestAnimationFrame polyfill
+    // Ensures consistent animation frame behavior across older browsers.
+    // -----------------------------
+    let _lastTime = 0;
+    const _vendors = ["ms", "moz", "webkit", "o"];
+    for (let i = 0; i < _vendors.length && !global.requestAnimationFrame; ++i) {
+        global.requestAnimationFrame = global[_vendors[i] + "RequestAnimationFrame"];
+        global.cancelAnimationFrame = global[_vendors[i] + "CancelAnimationFrame"] || global[_vendors[i] + "CancelRequestAnimationFrame"];
     }
-    return clone;
-  }
 
-  // Additional helper functions can be added as needed...
+    if (!global.requestAnimationFrame) {
+        global.requestAnimationFrame = function (callback) {
+            const currTime = new Date().getTime();
+            const timeToCall = Math.max(0, 16 - (currTime - _lastTime));
+            const id = global.setTimeout(function () {
+                callback(currTime + timeToCall);
+            }, timeToCall);
+            _lastTime = currTime + timeToCall;
+            return id;
+        };
+    }
 
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-      animate: global.animate
+    if (!global.cancelAnimationFrame) {
+        global.cancelAnimationFrame = function (id) {
+            clearTimeout(id);
+        };
+    }
+
+    // -----------------------------
+    // Internal defaults and mappings
+    // Color defaults and map from logical property -> CSS format.
+    // -----------------------------
+    const COLOR_DEFAULTS = { rgbR: 255, rgbG: 255, rgbB: 255, rgbA: 1 };
+
+    const COLOR_PROPERTIES = {
+        color: COLOR_DEFAULTS,
+        background: COLOR_DEFAULTS,
+        backgroundColor: COLOR_DEFAULTS,
+        borderColor: COLOR_DEFAULTS
     };
-  } else {
-    global.SelectAnimation = {
-      animate: global.animate
-    };
-  }
 
-})(typeof window !== 'undefined' ? window : global);
+    const PROPERTY_FORMAT_MAP = {
+        zIndex: "*",
+        left: "*px",
+        top: "*px",
+        bottom: "*px",
+        right: "*px",
+        width: "*px",
+        height: "*px",
+        minWidth: "*px",
+        minHeight: "*px",
+        maxWidth: "*px",
+        maxHeight: "*px",
+        padding: "*px",
+        margin: "*px",
+        borderRadius: "*%",
+        borderWidth: "*px",
+        borderTopWidth: "*px",
+        borderRightWidth: "*px",
+        borderBottomWidth: "*px",
+        borderLeftWidth: "*px",
+        borderImageWidth: "*px",
+        strokeWidth: "*px",
+        strokeHeight: "*px",
+        strokeOpacity: "*",
+        opacity: "*",
+        translateX: "translateX(*px)",
+        translateY: "translateY(*px)",
+        translateZ: "translateZ(*px)",
+        rotateX: "rotateX(*deg)",
+        rotateY: "rotateY(*deg)",
+        rotateZ: "rotateZ(*deg)",
+        scale: "scale(*)",
+        scaleX: "scaleX(*)",
+        scaleY: "scaleY(*)",
+        skewX: "skewX(*deg)",
+        skewY: "skewY(*deg)",
+        rgbR: "rgba(*,",
+        rgbG: "*,",
+        rgbB: "*,",
+        rgba: "rgba(rgbR,rgbG,rgbB,rgbA)"
+    };
+
+    // -----------------------------
+    // select: simple DOM selector utility
+    // Returns flat array of matched elements given one or more selectors
+    // Usage: select('.class', '#id')
+    // -----------------------------
+    const selectDom = function(...selectors) {
+        const all = [];
+        selectors.forEach(selector => {
+            const nodeList = document.querySelectorAll(selector);
+            all.push(...nodeList);
+        });
+        return all;
+    };
+
+    // -----------------------------
+    // animate: animation factory
+    // Accepts animation definitions and returns a runner function to start animations on targets.
+    // -----------------------------
+    const animate = function () {
+        const definitions = arguments;
+        const defsCopy = copyObj(definitions);
+
+        return function (targets, primaryParam, runtimeContext) {
+            let currentTargets, eventCheckResult, tmp, i, propIndex, fromItem, toItem, valFrom, valTo, t;
+            let grouped = [];
+            let runtimeGrouped = [];
+            let expectNextGroup = false;
+            let staging = { color: {}, transform: {}, from: {}, to: {} };
+
+            buildPlan();
+
+            function buildPlan() {
+                if (targets !== undefined) {
+                    if (!Array.isArray(targets)) targets = [targets];
+                    runtimeGrouped = targets;
+                }
+
+                let secondPass = false;
+
+                for (let c = 0, total = definitions.length; c < total; c++) {
+                    propIndex = 0;
+                    if (expectNextGroup || Array.isArray(defsCopy[c]) || isElement(defsCopy[c])) {
+                        if (secondPass) {
+                            Array.isArray(defsCopy[c]) || (defsCopy[c] = [defsCopy[c]]);
+                            Array.prototype.push.apply(grouped, defsCopy[c]);
+                        }
+                        expectNextGroup = false;
+                    } else if (typeof defsCopy[c] === 'object' && defsCopy[c] !== null) {
+                        if (secondPass) {
+                            if (c === 0) {
+                                for (let u = 0; void 0 !== targets[u]; u++) {
+                                    if (typeof targets[u] !== "number") grouped.push(targets[u]);
+                                }
+                            }
+                            if (targets !== undefined) {
+                                for (let j = 0; void 0 !== runtimeGrouped[j]; j++) {
+                                    if (typeof runtimeGrouped[j] !== "number") {
+                                        eventCheckResult = checkValEvent(runtimeContext, primaryParam, currentTargets, runtimeGrouped[j + 1]);
+                                        if (eventCheckResult[0]) currentTargets = eventCheckResult[0];
+                                        bindEvent(runtimeGrouped[j], runner(grouped, definitions, defsCopy, c), eventCheckResult[1]);
+                                    }
+                                }
+                            } else {
+                                runner(grouped, definitions, defsCopy, c)();
+                            }
+                        } else {
+                            expectNextGroup = false;
+                            const fromIsObject = typeof defsCopy[c].from === "object";
+                            const toIsObject = typeof defsCopy[c].to === "object";
+
+                            if (defsCopy[c].typeAnimation === "vibration" && defsCopy[c].vibrationStep === undefined) {
+                                defsCopy[c].vibrationStep = 6;
+                            } else {
+                                t = getNumber(defsCopy[c].typeAnimation);
+                                if (t && t.length === 4) {
+                                    defsCopy[c].cubicbezier = t;
+                                    defsCopy[c].typeAnimation = "cubicbezier";
+                                }
+                            }
+
+                            if (defsCopy[c].boucle && defsCopy[c].boucleType === undefined) {
+                                defsCopy[c].boucleType = "return";
+                            }
+
+                            if (!defsCopy[c].callback &&
+                                (Array.isArray(defsCopy[c].property) || (defsCopy[c].property !== undefined && (defsCopy[c].property = [defsCopy[c].property])))) {
+                                
+                                defsCopy[c].property.forEach(function (propItem) {
+                                    if (!fromIsObject) valFrom = defsCopy[c].from;
+                                    else fromItem = defsCopy[c]["from"][propIndex];
+
+                                    if (!toIsObject) valTo = defsCopy[c].to;
+                                    else toItem = defsCopy[c]["to"][propIndex];
+
+                                    if (typeof propItem === "object") {
+                                        let propName = Object.keys(propItem)[0];
+                                        if (!Array.isArray(propItem[propName])) propItem[propName] = [propItem[propName]];
+
+                                        if ((propName.toLowerCase().indexOf("color") !== -1 && (staging.color[propName] = COLOR_PROPERTIES[propName])) ||
+                                            propName.toLowerCase().indexOf("transform") !== -1) {
+                                            
+                                            let inner = 0;
+                                            staging["from"][propName] = {};
+                                            staging["to"][propName] = {};
+
+                                            propItem[propName].forEach(function (innerProp) {
+                                                if (propName.toLowerCase() === "transform") staging[propName][innerProp] = 0;
+                                                else staging.color[propName][innerProp] = 0;
+
+                                                if (fromIsObject) {
+                                                    if (fromItem[propName] !== undefined) {
+                                                        if (typeof fromItem[propName] === "number") {
+                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName];
+                                                        } else if (Array.isArray(fromItem[propName])) {
+                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName][inner] !== undefined ? fromItem[propName][inner] : valFrom;
+                                                        } else if (fromItem[propName][innerProp] !== undefined) {
+                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName][innerProp];
+                                                        }
+                                                    } else {
+                                                        staging["from"][propName][innerProp] = valFrom;
+                                                    }
+                                                } else {
+                                                    staging["from"][propName][innerProp] = defsCopy[c].from;
+                                                }
+
+                                                if (toIsObject) {
+                                                    if (toItem[propName] !== undefined) {
+                                                        if (typeof toItem[propName] === "number") {
+                                                            valTo = staging["to"][propName][innerProp] = toItem[propName];
+                                                        } else if (Array.isArray(toItem[propName])) {
+                                                            valTo = staging["to"][propName][innerProp] = toItem[propName][inner] !== undefined ? toItem[propName][inner] : valTo;
+                                                        } else if (toItem[propName][innerProp] !== undefined) {
+                                                            valTo = staging["to"][propName][innerProp] = toItem[propName][innerProp];
+                                                        }
+                                                    } else {
+                                                        staging["to"][propName][innerProp] = valTo;
+                                                    }
+                                                } else {
+                                                    staging["to"][propName][innerProp] = defsCopy[c].to;
+                                                }
+                                                inner++;
+                                            });
+                                            propIndex++;
+                                        }
+                                    } else {
+                                        if (fromIsObject) {
+                                            valFrom = staging["from"][propItem] = fromItem[propItem] !== undefined ? fromItem[propItem] : (fromItem !== undefined ? fromItem : valFrom);
+                                        } else {
+                                            staging["from"][propItem] = defsCopy[c].from;
+                                        }
+
+                                        if (toIsObject) {
+                                            valTo = staging["to"][propItem] = toItem[propItem] !== undefined ? toItem[propItem] : (toItem !== undefined ? toItem : valTo);
+                                        } else {
+                                            staging["to"][propItem] = defsCopy[c].to;
+                                        }
+                                        propIndex++;
+                                    }
+                                });
+                            }
+                            defsCopy[c].storeValueAnim = copyObj(staging);
+                            staging = { color: {}, transform: {}, from: {}, to: {} };
+                        }
+                        if (definitions[c + 1] !== undefined && (Array.isArray(definitions[c + 1]) || isElement(definitions[c + 1]))) {
+                            expectNextGroup = true;
+                            grouped = [];
+                        }
+                    }
+                    if (c === total - 1 && !secondPass) {
+                        expectNextGroup = false;
+                        secondPass = true;
+                        c = -1;
+                    }
+                }
+            }
+
+            function runner(group, defs, defsCopyLocal, configIndex) {
+                const conf = defs[configIndex];
+                const declaredAnim = defsCopyLocal[configIndex].typeAnimation;
+                let alternateAnim = declaredAnim;
+
+                conf.timeline = !isNaN(Number(conf.timeline)) ? Number(conf.timeline) : 0;
+                conf.startafter = !isNaN(Number(conf.startafter)) ? Number(conf.startafter) : 0;
+
+                if (conf.boucle) {
+                    conf.delay = !isNaN(Number(conf.delay)) ? Number(conf.delay) : undefined;
+                    if (conf.boucleType === "returnRepeat" || conf.boucleType === "repeatReturn") {
+                        alternateAnim = Easing[declaredAnim][1];
+                    }
+                }
+
+                return function run(indexArg) {
+                    let pausedAccum = 0;
+                    let isPaused = false;
+                    let pauseStart;
+
+                    if (conf.pause && Array.isArray(conf.pause)) {
+                        const eventCfg = conf.pause[1] || "e:click|false";
+                        const parts = eventCfg.replace('e:', '').split('|');
+                        const eventName = parts[0];
+                        const useCapture = parts[1] === 'true';
+
+                        const togglePause = function (e) {
+                            if (e) {
+                                if (isPaused) {
+                                    isPaused = false;
+                                    pausedAccum += Date.now() - pauseStart;
+                                } else {
+                                    isPaused = true;
+                                    pauseStart = Date.now();
+                                }
+                            }
+                        };
+
+                        const targetEls = document.querySelectorAll(conf.pause[0]);
+                        targetEls.forEach(el => el.addEventListener(eventName, togglePause, useCapture));
+                    }
+
+                    const startedAt = Date.now();
+
+                    group.forEach(function (el, idx) {
+                        if (!el.storeTransform) el.storeTransform = copyObj(defsCopyLocal[configIndex].storeValueAnim.transform);
+                        if (!el.storeColor) {
+                            el.storeColor = copyObj(defsCopyLocal[configIndex].storeValueAnim.color);
+                        } else {
+                            Object.keys(defsCopyLocal[configIndex].storeValueAnim.color).forEach(key => {
+                                if (!el.storeColor[key]) el.storeColor[key] = defsCopyLocal[configIndex].storeValueAnim.color[key];
+                            });
+                        }
+
+                        if (conf.timeline !== 0) {
+                            frameRunner([el], idx, conf.timeline * idx + conf.startafter, conf.startafter);
+                        }
+                    });
+
+                    if (conf.timeline === 0) {
+                        frameRunner(group, 0, 0 + conf.startafter, conf.startafter);
+                    }
+
+                    function frameRunner(targetArray, idx, timeOffset, startAfter) {
+                        if (conf.animFram) cancelAnimationFrame(conf.animFram[idx]);
+                        else conf.animFram = {};
+
+                        const iterConf = copyObj(defsCopyLocal[configIndex]);
+                        iterConf.changetypeAnim = iterConf.typeAnimation;
+                        iterConf.countSkip = 0;
+                        iterConf.countSkip2 = 0;
+
+                        let skipCounter;
+                        const sv = iterConf.storeValueAnim;
+
+                        function loop() {
+                            if (isPaused) {
+                                conf.animFram[idx] = requestAnimationFrame(loop);
+                                return;
+                            }
+
+                            let delay = 0;
+                            let eased, tmpVal, css;
+                            const elapsed = Date.now() - (startedAt + timeOffset + pausedAccum);
+
+                            if (elapsed >= 0) {
+                                if (iterConf.boucle) {
+                                    if (iterConf.delay !== undefined) {
+                                        delay = iterConf.delay;
+                                        skipCounter = Math.floor((elapsed + delay) / (iterConf.duration + delay));
+                                        if (skipCounter !== iterConf.countSkip) {
+                                            iterConf.countSkip = skipCounter;
+                                            iterConf.skip = iterConf.skipDelay = true;
+                                        } else {
+                                            iterConf.skip = false;
+                                            if (elapsed % (iterConf.duration + delay) < iterConf.duration) {
+                                                iterConf.skipDelay = false;
+                                                if (iterConf.countSkip2 !== iterConf.countSkip) {
+                                                    iterConf.countSkip2 = iterConf.countSkip;
+                                                    iterConf.skip2 = true;
+                                                } else iterConf.skip2 = false;
+                                            }
+                                        }
+                                    } else {
+                                        skipCounter = Math.floor((elapsed + delay) / (iterConf.duration + delay));
+                                        if (skipCounter !== iterConf.countSkip) {
+                                            iterConf.countSkip = iterConf.countSkip2 = skipCounter;
+                                            iterConf.skip = iterConf.skip2 = true;
+                                        } else {
+                                            iterConf.skip = iterConf.skip2 = false;
+                                        }
+                                    }
+
+                                    iterConf.timeEasing = elapsed % (iterConf.duration + delay);
+                                    if (iterConf.skip) {
+                                        iterConf.impair = !iterConf.impair;
+                                        iterConf.changetypeAnim = iterConf.impair ? alternateAnim : declaredAnim;
+                                        iterConf.timeEasing = (iterConf.impair || iterConf.boucleType.indexOf("repeat") === 0) ? iterConf.duration : 0;
+                                    } else if (!iterConf.skipDelay) {
+                                        if (iterConf.impair && iterConf.boucleType.indexOf("return") === 0) {
+                                            iterConf.timeEasing = iterConf.duration - iterConf.timeEasing;
+                                        }
+                                    }
+                                } else {
+                                    iterConf.timeEasing = elapsed < iterConf.duration ? elapsed : iterConf.duration;
+                                }
+
+                                if (!iterConf.skipDelay || iterConf.skip) {
+                                    eased = Easing[iterConf.changetypeAnim][0](iterConf.timeEasing, 0, 1, iterConf.duration, iterConf, idx);
+
+                                    if (iterConf.callback) {
+                                        targetArray.forEach(function (el, index) {
+                                            iterConf.callback(el, eased, iterConf, idx !== index ? idx : index);
+                                        });
+                                    } else {
+                                        iterConf.property.forEach(function (prop) {
+                                            css = "";
+                                            let key = typeof prop === "string" ? prop : Object.keys(prop)[0];
+
+                                            if (key.toLowerCase() === "transform" && sv[key] != null) {
+                                                prop.transform.forEach(function (tr) {
+                                                    tmpVal = sv["from"][key][tr] + eased * (sv["to"][key][tr] - sv["from"][key][tr]);
+                                                    targetArray.forEach(el => el.storeTransform[tr] = tmpVal);
+                                                });
+                                                targetArray.forEach(function (el) {
+                                                    Object.keys(el.storeTransform).forEach(k => {
+                                                        css += " " + PROPERTY_FORMAT_MAP[k].replace("*", el.storeTransform[k]);
+                                                    });
+                                                    el.style.transform = css;
+                                                    css = "";
+                                                });
+                                            } else if (key.toLowerCase().indexOf("color") !== -1 && sv.color != null) {
+                                                targetArray.forEach(function (el) {
+                                                    prop[key].forEach(function (colProp) {
+                                                        tmpVal = sv["from"][key][colProp] + eased * (sv["to"][key][colProp] - sv["from"][key][colProp]);
+                                                        el.storeColor[key][colProp] = tmpVal;
+                                                    });
+
+                                                    let colorStr = PROPERTY_FORMAT_MAP.rgba;
+                                                    for (let colKey in COLOR_DEFAULTS) {
+                                                        colorStr = colorStr.replace(new RegExp(colKey, "g"), el.storeColor[key][colKey]);
+                                                    }
+                                                    el.style[key] = colorStr;
+                                                });
+                                            } else {
+                                                css = (iterConf.px === "%" ? PROPERTY_FORMAT_MAP[key].replace("px", "%") : PROPERTY_FORMAT_MAP[key]).replace("*", sv["from"][key] + eased * (sv["to"][key] - sv["from"][key]));
+                                                targetArray.forEach(el => el.style[key] = css);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+
+                            if (iterConf.boucle || elapsed < iterConf.duration) {
+                                conf.animFram[idx] = requestAnimationFrame(loop);
+                            }
+                        }
+
+                        loop();
+                    }
+                };
+            }
+        };
+    };
+
+    // -----------------------------
+    // Easing functions
+    // Standard easing definitions used by the animation engine.
+    // -----------------------------
+    const Easing = {
+        linear: [function(e, n, t, a) { return t * e / a + n }, "linear"],
+        quadin: [function(e, n, t, a) { return t * (e /= a) * e + n }, "quadout"],
+        quadout: [function(e, n, t, a) { return -t * (e /= a) * (e - 2) + n }, "quadin"],
+        quadinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e + n : -t / 2 * (--e * (e - 2) - 1) + n }, "quadoutin"],
+        quadoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (p0 * p0))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (p0 * p0) + 0.5) + n;
+            }
+        }, "quadinout"],
+        cubicin: [function(e, n, t, a) { return t * (e /= a) * e * e + n }, "cubicout"],
+        cubicout: [function(e, n, t, a) { return t * ((e = e / a - 1) * e * e + 1) + n }, "cubicin"],
+        cubicinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e * e + n : t / 2 * ((e -= 2) * e * e + 2) + n }, "cubicoutin"],
+        cubicoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (p0 * p0 * p0))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (p0 * p0 * p0) + 0.5) + n;
+            }
+        }, "cubicinout"],
+        quartin: [function(e, n, t, a) { return t * (e /= a) * e * e * e + n }, "quartout"],
+        quartout: [function(e, n, t, a) { return -t * ((e = e / a - 1) * e * e * e - 1) + n }, "quartin"],
+        quartinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e * e * e + n : -t / 2 * ((e -= 2) * e * e * e - 2) + n }, "quartoutin"],
+        quartoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (p0 * p0 * p0 * p0))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (p0 * p0 * p0 * p0) + 0.5) + n;
+            }
+        }, "quartinout"],
+        quintin: [function(e, n, t, a) { return t * (e /= a) * e * e * e * e + n }, "quintout"],
+        quintout: [function(e, n, t, a) { return t * ((e = e / a - 1) * e * e * e * e + 1) + n }, "quintin"],
+        quintinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? t / 2 * e * e * e * e * e + n : t / 2 * ((e -= 2) * e * e * e * e + 2) + n }, "quintoutin"],
+        quintoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (p0 * p0 * p0 * p0 * p0))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (p0 * p0 * p0 * p0 * p0) + 0.5) + n;
+            }
+        }, "quintinout"],
+        sinein: [function(e, n, t, a) { return -t * Math.cos(e / a * (Math.PI / 2)) + t + n }, "sineout"],
+        sineout: [function(e, n, t, a) { return t * Math.sin(e / a * (Math.PI / 2)) + n }, "sinein"],
+        sineinout: [function(e, n, t, a) { return -t / 2 * (Math.cos(Math.PI * e / a) - 1) + n }, "sineoutin"],
+        sineoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (1 - Math.cos(p0 * Math.PI / 2)))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (1 - Math.cos(p0 * Math.PI / 2)) + 0.5) + n;
+            }
+        }, "sineinout"],
+        expoin: [function(e, n, t, a) { return 0 === e ? n : t * Math.pow(2, 10 * (e / a - 1)) + n }, "expoout"],
+        expoout: [function(e, n, t, a) { return e === a ? n + t : t * (1 - Math.pow(2, -10 * e / a)) + n }, "expoin"],
+        expoinout: [function(e, n, t, a) { return 0 === e ? n : e === a ? n + t : (e /= a / 2) < 1 ? t / 2 * Math.pow(2, 10 * (e - 1)) + n : t / 2 * (2 - Math.pow(2, -10 * --e)) + n }, "expooutin"],
+        expooutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p === 0) return n;
+            else if (p === 1) return n + t;
+            else if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (Math.pow(2, 10 * (p0 - 1))))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (Math.pow(2, 10 * (p0 - 1))) + 0.5) + n;
+            }
+        }, "expoinout"],
+        circin: [function(e, n, t, a) { return -t * (Math.sqrt(1 - (e /= a) * e) - 1) + n }, "circout"],
+        circout: [function(e, n, t, a) { return t * Math.sqrt(1 - (e = e / a - 1) * e) + n }, "circin"],
+        circinout: [function(e, n, t, a) { return (e /= a / 2) < 1 ? -t / 2 * (Math.sqrt(1 - e * e) - 1) + n : t / 2 * (Math.sqrt(1 - (e -= 2) * e) + 1) + n }, "circoutin"],
+        circoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * Math.sqrt(1 - p0 * p0)) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (1 - Math.sqrt(1 - p0 * p0)) + 0.5) + n;
+            }
+        }, "circinout"],
+        elasticin: [function(e, n, t, a) {
+            let c = 1.70158, b = 0, r = t;
+            return 0 === e ? n : 1 === (e /= a) ? n + t : (b = b || .3 * a, c = r < Math.abs(t) ? (r = t, b / 4) : b / (2 * Math.PI) * Math.asin(t / r), -(r * Math.pow(2, 10 * --e) * Math.sin((e * a - c) * (2 * Math.PI) / b)) + n)
+        }, "elasticout"],
+        elasticout: [function(e, n, t, a) {
+            let c = 1.70158, b = 0, r = t;
+            return 0 === e ? n : 1 === (e /= a) ? n + t : (b = b || .3 * a, c = r < Math.abs(t) ? (r = t, b / 4) : b / (2 * Math.PI) * Math.asin(t / r), r * Math.pow(2, -10 * e) * Math.sin((e * a - c) * (2 * Math.PI) / b) + t + n)
+        }, "elasticin"],
+        elasticinout: [function(e, n, t, a) {
+            let c = 1.70158, b = 0, r = t;
+            return 0 === e ? n : 2 === (e /= a / 2) ? n + t : (b = b || a * (.3 * 1.5), c = r < Math.abs(t) ? (r = t, b / 4) : b / (2 * Math.PI) * Math.asin(t / r), e < 1 ? r * Math.pow(2, 10 * --e) * Math.sin((e * a - c) * (2 * Math.PI) / b) * -.5 + n : r * Math.pow(2, -10 * --e) * Math.sin((e * a - c) * (2 * Math.PI) / b) * .5 + t + n)
+        }, "elasticoutin"],
+        elasticoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p === 0) return n;
+            else if (p === 1) return t + n;
+            
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - (-Math.pow(2, 8 * (p0 - 1)) * Math.sin(((p0 - 1) * 80 - 7.5) * Math.PI / 15)))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * (-Math.pow(2, 8 * (p0 - 1)) * Math.sin(((p0 - 1) * 80 - 7.5) * Math.PI / 15)) + 0.5) + n
+            }
+        }, "elasticinout"],
+        backin: [function(e, n, t, a) { return t * (e /= a) * e * (2.70158 * e - 1.70158) + n }, "backout"],
+        backout: [function(e, n, t, a) { return t * ((e = e / a - 1) * e * (2.70158 * e + 1.70158) + 1) + n }, "backin"],
+        backinout: [function(e, n, t, a) {
+            let c = 1.70158;
+            return (e /= a / 2) < 1 ? t / 2 * (e * e * ((1 + (c *= 1.525)) * e - c)) + n : t / 2 * ((e -= 2) * e * ((1 + (c *= 1.525)) * e + c) + 2) + n
+        }, "backoutin"],
+        backoutin: [function(e, n, t, a) {
+            let p = e / a, p0;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                return t * (0.5 * (1 - p0 * p0 * (3 * p0 - 2))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                return t * (0.5 * p0 * p0 * (3 * p0 - 2) + 0.5) + n;
+            }
+        }, "backinout"],
+        bouncein: [function(e, n, t, a) { return t - Easing.bounceout[0](a - e, 0, t, a) + n }, "bounceout"],
+        bounceout: [function(e, n, t, a) {
+            return (e /= a) < 1 / 2.75 ? t * (7.5625 * e * e) + n : e < 2 / 2.75 ? t * (7.5625 * (e -= 1.5 / 2.75) * e + .75) + n : e < 2.5 / 2.75 ? t * (7.5625 * (e -= 2.25 / 2.75) * e + .9375) + n : t * (7.5625 * (e -= 2.625 / 2.75) * e + .984375) + n
+        }, "bouncein"],
+        bounceinout: [function(e, n, t, a) {
+            return e < a / 2 ? .5 * Easing.bouncein[0](2 * e, 0, t, a) + n : .5 * Easing.bounceout[0](2 * e - a, 0, t, a) + .5 * t + n
+        }, "bounceoutin"],
+        bounceoutin: [function(e, n, t, a) {
+            let p = e / a, p0, pow2, bounce = 4;
+            if (p < 0.5) {
+                p0 = 1 - 2 * p;
+                while (p0 < ((pow2 = Math.pow(2, --bounce)) - 1) / 11) {}
+                return t * (0.5 * (1 - (1 / Math.pow(4, 3 - bounce) - 7.5625 * Math.pow((pow2 * 3 - 2) / 22 - p0, 2)))) + n;
+            } else {
+                p0 = p * 2 - 1;
+                while (p0 < ((pow2 = Math.pow(2, --bounce)) - 1) / 11) {}
+                return t * (0.5 * (1 / Math.pow(4, 3 - bounce) - 7.5625 * Math.pow((pow2 * 3 - 2) / 22 - p0, 2) + 0.5)) + n;
+            }
+        }, "bounceinout"],
+        vibration: [function(e, n, t, a, c) {
+            return n + (t - n) / 2 + Math.sin(e * Math.PI / (a / c.vibrationStep) + 3 * Math.PI / 2) * (t - n) / 2
+        }, "vibration"],
+        cubicbezier: [function(e, n, t, a, c, idx) {
+            let q = 1, qq = 0, sol;
+            if (c.impair && (c.boucleType === "returnRepeat" || c.boucleType === "repeatReturn")) {
+                q = -1; qq = 1;
+            }
+            let b = e / a, r = 1 - b,
+                l = Number(q * c.cubicbezier[0] + qq),
+                o = Number(q * c.cubicbezier[2] + qq);
+                
+            if ((sol = solveCubic(3 * l - 3 * o + 1, 0 - 6 * l + 3 * o, 3 * l, 0 - b))) {
+                b = sol;
+                r = 1 - b;
+            }
+            let y = (r = 1 - b) * r * r * 0 + 3 * r * r * b * Number(q * c.cubicbezier[1] + qq) + 3 * r * b * b * Number(q * c.cubicbezier[3] + qq) + b * b * b * 1;
+            return n + y * t;
+        }, "cubicbezier"]
+    };
+
+    // The rest of easing functions identical to original (unchanged for correctness)
+    // (For brevity in this file view we keep the full Easing object above in the same form as original.)
+
+    // -----------------------------
+    // Math helpers: cubic solver and cube root
+    // -----------------------------
+    function solveCubic(a, b, c, d) {
+        let p = (3 * a * c - b * b) / (3 * a * a);
+        let q = (2 * b * b * b - 9 * a * b * c + 27 * a * a * d) / (27 * a * a * a);
+        let r;
+
+        if (Math.abs(p) < 1e-8) {
+            if ((r = cubeRoot(-q) - b / (3 * a)) <= 1 && r >= 0) return r;
+        } else if (Math.abs(q) < 1e-8) {
+            if (((r = Math.sqrt(-p) - b / (3 * a)) <= 1 && r >= 0) || ((r = -Math.sqrt(-p) - b / (3 * a)) <= 1 && r >= 0)) return r;
+            else return 0;
+        } else {
+            let D = q * q / 4 + p * p * p / 27;
+            if (Math.abs(D) < 1e-8) {
+                if (((r = -1.5 * q / p - b / (3 * a)) <= 1 && r >= 0) || ((r = 3 * q / p - b / (3 * a)) <= 1 && r >= 0)) return r;
+            } else if (D > 0) {
+                let u = cubeRoot(-q / 2 - Math.sqrt(D));
+                if ((r = (u - p / (3 * u)) - b / (3 * a)) <= 1 && r >= 0) return r;
+            } else {
+                let u = 2 * Math.sqrt(-p / 3);
+                let t = Math.acos(3 * q / p / u) / 3;
+                let k = 2 * Math.PI / 3;
+                if (((r = u * Math.cos(t) - b / (3 * a)) <= 1 && r >= 0) || ((r = u * Math.cos(t - k) - b / (3 * a)) <= 1 && r >= 0) || ((r = u * Math.cos(t - 2 * k) - b / (3 * a)) <= 1 && r >= 0)) return r;
+            }
+        }
+    }
+
+    function cubeRoot(v) {
+        let n = Math.pow(Math.abs(v), 1 / 3);
+        return v < 0 ? -n : n;
+    }
+
+    // -----------------------------
+    // Utilities: getNumber, getStyle, isElement, copyObj
+    // -----------------------------
+    function getNumber(str) {
+        return (str || '').match(/[+-]?\d+(\.\d+)?/g);
+    }
+
+    function getStyle(el, cssprop) {
+        if (el.currentStyle) return el.currentStyle[cssprop];
+        else if (document.defaultView && document.defaultView.getComputedStyle) return document.defaultView.getComputedStyle(el, "")[cssprop];
+        else return el.style[cssprop];
+    }
+
+    function isElement(element) {
+        return element instanceof Element || element instanceof HTMLDocument;
+    }
+
+    const copyObj = function(obj) {
+        let ret;
+        const assign = function(o, key, target) {
+            let sub = Object.prototype.toString.call(o[key]);
+            if (sub === "[object Object]" || sub === "[object Array]") {
+                target[key] = copyObj(o[key]);
+            } else {
+                target[key] = o[key];
+            }
+        };
+
+        if (Object.prototype.toString.call(obj) === "[object Object]") {
+            ret = {};
+            for (let key in obj) {
+                if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                    assign(obj, key, ret);
+                }
+            }
+        } else if (Object.prototype.toString.call(obj) === "[object Array]") {
+            ret = [];
+            for (let i = 0; i < obj.length; i++) {
+                assign(obj, i, ret);
+            }
+        } else {
+            ret = obj;
+        }
+        return ret;
+    };
+
+    // Expose both for browser and Node/npm consumers
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = {
+          animate,
+          selectDom,
+          copyObj
+        };
+    }
+
+    if (typeof global !== 'undefined') {
+        global.animate = animate;
+        global.selectDom = selectDom;
+        global.copyObj = copyObj;
+    }
+
+})(typeof window !== 'undefined' ? window : this);

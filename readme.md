@@ -1,6 +1,17 @@
 
 # 🚀 Select-Animation
 
+[![npm version](https://img.shields.io/npm/v/select-animation.svg)](https://www.npmjs.com/package/select-animation)
+[![GitHub license](https://img.shields.io/github/license/housseynCheriet/Select-Animation.svg)](https://github.com/housseynCheriet/Select-Animation)
+
+A high-performance, lightweight JavaScript animation engine.
+
+**Support our project:** [selectjs.vercel.app](https://selectjs.vercel.app)
+**NPM Package:** [npmjs.com/package/select-animation](https://www.npmjs.com/package/select-animation)
+**Source Code:** [github.com/housseynCheriet/Select-Animation](https://github.com/housseynCheriet/Select-Animation)
+
+---
+
 ## **High‑Performance JavaScript Engine for Organic & Fluid Motion**
 
 **Select-Animation** is a lightweight yet powerful JavaScript animation engine built in pure JavaScript, with zero dependencies. Designed for developers who require **full control over timing, easing, looping, and DOM interactions**, it emphasizes **performance, mathematical precision, and flexibility**.
@@ -233,16 +244,7 @@ Experiment with **Select-Animation** and explore various examples in your browse
 
 This interactive playground allows you to tweak properties, easing types, and sequences in real-time.
 
----
 
-[![npm version](https://img.shields.io/npm/v/select-animation.svg)](https://www.npmjs.com/package/select-animation)
-[![GitHub license](https://img.shields.io/github/license/housseynCheriet/Select-Animation.svg)](https://github.com/housseynCheriet/Select-Animation)
-
-A high-performance, lightweight JavaScript animation engine.
-
-**Support our project:** [selectjs.vercel.app](https://selectjs.vercel.app)
-**NPM Package:** [npmjs.com/package/select-animation](https://www.npmjs.com/package/select-animation)
-**Source Code:** [github.com/housseynCheriet/Select-Animation](https://github.com/housseynCheriet/Select-Animation)
 
 ---
 

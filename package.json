@@ -1,6 +1,6 @@
 {
   "name": "select-animation",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "High-performance JavaScript animation engine for organic & fluid motion",
   "main": "select-animation.js",  
   "scripts": {
@@ -10,6 +10,10 @@
     "type": "git",
     "url": "https://github.com/housseynCheriet/Select-Animation"
   },
+"bugs": {
+  "url": "https://github.com/housseynCheriet/Select-Animation/issues"
+},
+"homepage": "https://selectjs.vercel.app",
   "keywords": [
     "animation",
     "javascript",

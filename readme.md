@@ -235,6 +235,17 @@ This interactive playground allows you to tweak properties, easing types, and se
 
 ---
 
+[![npm version](https://img.shields.io/npm/v/select-animation.svg)](https://www.npmjs.com/package/select-animation)
+[![GitHub license](https://img.shields.io/github/license/housseynCheriet/Select-Animation.svg)](https://github.com/housseynCheriet/Select-Animation)
+
+A high-performance, lightweight JavaScript animation engine.
+
+**Support our project:** [selectjs.vercel.app](https://selectjs.vercel.app)
+**NPM Package:** [npmjs.com/package/select-animation](https://www.npmjs.com/package/select-animation)
+**Source Code:** [github.com/housseynCheriet/Select-Animation](https://github.com/housseynCheriet/Select-Animation)
+
+---
+
 # ⚙ Internal Architecture
 
 The engine includes:

@@ -100,13 +100,37 @@
     // Returns flat array of matched elements given one or more selectors
     // Usage: select('.class', '#id')
     // -----------------------------
-    const selectDom = function(...selectors) {
-        const all = [];
-        selectors.forEach(selector => {
-            const nodeList = document.querySelectorAll(selector);
-            all.push(...nodeList);
-        });
-        return all;
+    // --- Enhanced DOM Selection Utility with Explicit Error Reporting ---
+    const selectDom = function (selector) {
+        // 1. Check if the input is a DOM element directly
+        if (isElement(selector)) return [selector];
+
+        // 2. Handle string selectors (e.g., ".class", "#id")
+        if (typeof selector === "string") {
+            const nodes = document.querySelectorAll(selector);
+            if (nodes.length === 0) {
+                // Warning if the selector is valid string but matches nothing
+                console.warn(`Select-Animation: No elements found matching the selector "${selector}".`);
+            }
+            return Array.from(nodes);
+        }
+
+        // 3. Handle arrays or collections
+        if (Array.isArray(selector) || (selector && typeof selector.length === "number")) {
+            return Array.from(selector).filter(isElement);
+        }
+
+        // 4. CRITICAL: Handle invalid types (like numbers, null, undefined)
+        if (selector !== undefined && selector !== null) {
+            // Throwing a console error to stop the developer and force a fix
+            console.error(
+                `Select-Animation ERROR: Invalid input passed to selectDom().\n` +
+                `Expected: String (selector), HTMLElement, or Array.\n` +
+                `Received: ${typeof selector} (${selector})`
+            );
+        }
+
+        return [];
     };
 
     // -----------------------------
@@ -117,82 +141,87 @@
         const definitions = arguments;
         const defsCopy = copyObj(definitions);
 
-        return function (targets, primaryParam, runtimeContext) {
-            let currentTargets, eventCheckResult, tmp, i, propIndex, fromItem, toItem, valFrom, valTo, t;
+        return function () {
+            let tmp, i, propIndex, fromItem, toItem, valFrom, valTo, t;
             let grouped = [];
-            let runtimeGrouped = [];
             let expectNextGroup = false;
             let staging = { color: {}, transform: {}, from: {}, to: {} };
 
+            // Process the definitions to map elements to their animation settings
             buildPlan();
 
             function buildPlan() {
-                if (targets !== undefined) {
-                    if (!Array.isArray(targets)) targets = [targets];
-                    runtimeGrouped = targets;
-                }
-
                 let secondPass = false;
 
                 for (let c = 0, total = definitions.length; c < total; c++) {
                     propIndex = 0;
+                    // If current item is an element or an array of elements
                     if (expectNextGroup || Array.isArray(defsCopy[c]) || isElement(defsCopy[c])) {
                         if (secondPass) {
                             Array.isArray(defsCopy[c]) || (defsCopy[c] = [defsCopy[c]]);
                             Array.prototype.push.apply(grouped, defsCopy[c]);
                         }
                         expectNextGroup = false;
-                    } else if (typeof defsCopy[c] === 'object' && defsCopy[c] !== null) {
+                    } 
+                    // --- Handle Configuration Object with Validation ---
+                    else if (typeof defsCopy[c] === 'object' && defsCopy[c] !== null) {
                         if (secondPass) {
-                            if (c === 0) {
-                                for (let u = 0; void 0 !== targets[u]; u++) {
-                                    if (typeof targets[u] !== "number") grouped.push(targets[u]);
-                                }
-                            }
-                            if (targets !== undefined) {
-                                for (let j = 0; void 0 !== runtimeGrouped[j]; j++) {
-                                    if (typeof runtimeGrouped[j] !== "number") {
-                                        eventCheckResult = checkValEvent(runtimeContext, primaryParam, currentTargets, runtimeGrouped[j + 1]);
-                                        if (eventCheckResult[0]) currentTargets = eventCheckResult[0];
-                                        bindEvent(runtimeGrouped[j], runner(grouped, definitions, defsCopy, c), eventCheckResult[1]);
-                                    }
-                                }
-                            } else {
-                                runner(grouped, definitions, defsCopy, c)();
-                            }
+                            // Execute the animation runner for the current group
+                            runner(grouped, definitions, defsCopy, c)();
                         } else {
                             expectNextGroup = false;
-                            const fromIsObject = typeof defsCopy[c].from === "object";
-                            const toIsObject = typeof defsCopy[c].to === "object";
 
-                            if (defsCopy[c].typeAnimation === "vibration" && defsCopy[c].vibrationStep === undefined) {
+                            // 1. Validate Duration and Animation Type
+                            defsCopy[c].duration = (typeof defsCopy[c].duration === 'number' && defsCopy[c].duration > 0) ? defsCopy[c].duration : 1000;
+                            
+                            let requestedType = defsCopy[c].typeAnimation;
+
+                            if (requestedType === "vibration" && defsCopy[c].vibrationStep === undefined) {
                                 defsCopy[c].vibrationStep = 6;
-                            } else {
-                                t = getNumber(defsCopy[c].typeAnimation);
+                            } else if (requestedType) {
+                                t = getNumber(requestedType);
                                 if (t && t.length === 4) {
                                     defsCopy[c].cubicbezier = t;
                                     defsCopy[c].typeAnimation = "cubicbezier";
+                                } else {
+                                    // STOP EXECUTION: If easing is not found, do not fall back to linear
+                                    if (requestedType !== "linear" && requestedType !== "vibration" && requestedType !== "cubicbezier" && (!global.selectAnimationEase || !global.selectAnimationEase[requestedType])) {
+                                        // Use Error instead of warn to make it impossible to ignore
+                                        throw new Error(`Select-Animation ERROR: The easing function "${requestedType}" does not exist. Please check your spelling or definitions.`);
+                                    }
                                 }
                             }
+                            
+                            // Double-check if the animation type is valid before processing
+                            if (!defsCopy[c].typeAnimation) return;
 
-                            if (defsCopy[c].boucle && defsCopy[c].boucleType === undefined) {
-                                defsCopy[c].boucleType = "return";
-                            }
+                            // 2. Helper to sanitize input values (convert "100px" to 100)
+                            const parseVal = (v) => {
+                                if (typeof v === "number") return v;
+                                let p = parseFloat(v);
+                                return isNaN(p) ? 0 : p;
+                            };
 
-                            if (!defsCopy[c].callback &&
+                            // Process properties and prepare "from" and "to" values
+                            if (!defsCopy[c].callback && 
                                 (Array.isArray(defsCopy[c].property) || (defsCopy[c].property !== undefined && (defsCopy[c].property = [defsCopy[c].property])))) {
                                 
                                 defsCopy[c].property.forEach(function (propItem) {
-                                    if (!fromIsObject) valFrom = defsCopy[c].from;
-                                    else fromItem = defsCopy[c]["from"][propIndex];
+                                    const fromIsObject = typeof defsCopy[c].from === "object";
+                                    const toIsObject = typeof defsCopy[c].to === "object";
 
-                                    if (!toIsObject) valTo = defsCopy[c].to;
-                                    else toItem = defsCopy[c]["to"][propIndex];
+                                    // Safely extract from/to values based on their types
+                                    if (!fromIsObject) valFrom = parseVal(defsCopy[c].from);
+                                    else fromItem = defsCopy[c]["from"][propIndex] || 0;
+
+                                    if (!toIsObject) valTo = parseVal(defsCopy[c].to);
+                                    else toItem = defsCopy[c]["to"][propIndex] || 0;
 
                                     if (typeof propItem === "object") {
                                         let propName = Object.keys(propItem)[0];
                                         if (!Array.isArray(propItem[propName])) propItem[propName] = [propItem[propName]];
 
+                                        // Handle Colors and Transform objects
                                         if ((propName.toLowerCase().indexOf("color") !== -1 && (staging.color[propName] = COLOR_PROPERTIES[propName])) ||
                                             propName.toLowerCase().indexOf("transform") !== -1) {
                                             
@@ -204,65 +233,62 @@
                                                 if (propName.toLowerCase() === "transform") staging[propName][innerProp] = 0;
                                                 else staging.color[propName][innerProp] = 0;
 
+                                                // Validate and assign nested properties
                                                 if (fromIsObject) {
-                                                    if (fromItem[propName] !== undefined) {
-                                                        if (typeof fromItem[propName] === "number") {
-                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName];
-                                                        } else if (Array.isArray(fromItem[propName])) {
-                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName][inner] !== undefined ? fromItem[propName][inner] : valFrom;
-                                                        } else if (fromItem[propName][innerProp] !== undefined) {
-                                                            valFrom = staging["from"][propName][innerProp] = fromItem[propName][innerProp];
-                                                        }
-                                                    } else {
-                                                        staging["from"][propName][innerProp] = valFrom;
-                                                    }
+                                                    let raw = (fromItem[propName] !== undefined) ? (Array.isArray(fromItem[propName]) ? fromItem[propName][inner] : fromItem[propName][innerProp]) : valFrom;
+                                                    staging["from"][propName][innerProp] = parseVal(raw);
                                                 } else {
-                                                    staging["from"][propName][innerProp] = defsCopy[c].from;
+                                                    staging["from"][propName][innerProp] = parseVal(defsCopy[c].from);
                                                 }
 
                                                 if (toIsObject) {
-                                                    if (toItem[propName] !== undefined) {
-                                                        if (typeof toItem[propName] === "number") {
-                                                            valTo = staging["to"][propName][innerProp] = toItem[propName];
-                                                        } else if (Array.isArray(toItem[propName])) {
-                                                            valTo = staging["to"][propName][innerProp] = toItem[propName][inner] !== undefined ? toItem[propName][inner] : valTo;
-                                                        } else if (toItem[propName][innerProp] !== undefined) {
-                                                            valTo = staging["to"][propName][innerProp] = toItem[propName][innerProp];
-                                                        }
-                                                    } else {
-                                                        staging["to"][propName][innerProp] = valTo;
-                                                    }
+                                                    let raw = (toItem[propName] !== undefined) ? (Array.isArray(toItem[propName]) ? toItem[propName][inner] : toItem[propName][innerProp]) : valTo;
+                                                    staging["to"][propName][innerProp] = parseVal(raw);
                                                 } else {
-                                                    staging["to"][propName][innerProp] = defsCopy[c].to;
+                                                    staging["to"][propName][innerProp] = parseVal(defsCopy[c].to);
                                                 }
                                                 inner++;
                                             });
                                             propIndex++;
                                         }
                                     } else {
+                                        // Handle simple numeric CSS properties (width, height, etc.)
                                         if (fromIsObject) {
-                                            valFrom = staging["from"][propItem] = fromItem[propItem] !== undefined ? fromItem[propItem] : (fromItem !== undefined ? fromItem : valFrom);
+                                            let raw = fromItem[propItem] !== undefined ? fromItem[propItem] : (fromItem !== undefined ? fromItem : valFrom);
+                                            staging["from"][propItem] = parseVal(raw);
                                         } else {
-                                            staging["from"][propItem] = defsCopy[c].from;
+                                            staging["from"][propItem] = parseVal(defsCopy[c].from);
                                         }
 
                                         if (toIsObject) {
-                                            valTo = staging["to"][propItem] = toItem[propItem] !== undefined ? toItem[propItem] : (toItem !== undefined ? toItem : valTo);
+                                            let raw = toItem[propItem] !== undefined ? toItem[propItem] : (toItem !== undefined ? toItem : valTo);
+                                            staging["to"][propItem] = parseVal(raw);
                                         } else {
-                                            staging["to"][propItem] = defsCopy[c].to;
+                                            staging["to"][propItem] = parseVal(defsCopy[c].to);
                                         }
                                         propIndex++;
                                     }
                                 });
                             }
+
+                            // 3. Callback Safety Validation
+                            // Ensure hooks are actual functions to prevent execution errors
+                            if (defsCopy[c].onStep && typeof defsCopy[c].onStep !== 'function') defsCopy[c].onStep = null;
+                            if (defsCopy[c].onComplete && typeof defsCopy[c].onComplete !== 'function') defsCopy[c].onComplete = null;
+
+                            // Finalize staging data and store it
                             defsCopy[c].storeValueAnim = copyObj(staging);
                             staging = { color: {}, transform: {}, from: {}, to: {} };
                         }
+
+                        // Determine if the next item starts a new sequence group
                         if (definitions[c + 1] !== undefined && (Array.isArray(definitions[c + 1]) || isElement(definitions[c + 1]))) {
                             expectNextGroup = true;
                             grouped = [];
                         }
                     }
+                    
+                    // Switch to second pass to execute the runners
                     if (c === total - 1 && !secondPass) {
                         expectNextGroup = false;
                         secondPass = true;
@@ -276,9 +302,11 @@
                 const declaredAnim = defsCopyLocal[configIndex].typeAnimation;
                 let alternateAnim = declaredAnim;
 
+                // Sanitize timing inputs
                 conf.timeline = !isNaN(Number(conf.timeline)) ? Number(conf.timeline) : 0;
                 conf.startafter = !isNaN(Number(conf.startafter)) ? Number(conf.startafter) : 0;
 
+                // Prepare looping and easing alternates
                 if (conf.boucle) {
                     conf.delay = !isNaN(Number(conf.delay)) ? Number(conf.delay) : undefined;
                     if (conf.boucleType === "returnRepeat" || conf.boucleType === "repeatReturn") {
@@ -291,6 +319,7 @@
                     let isPaused = false;
                     let pauseStart;
 
+                    // Initialize event-based pause/resume logic if configured
                     if (conf.pause && Array.isArray(conf.pause)) {
                         const eventCfg = conf.pause[1] || "e:click|false";
                         const parts = eventCfg.replace('e:', '').split('|');
@@ -315,6 +344,7 @@
 
                     const startedAt = Date.now();
 
+                    // Initialize state storage for each element in the group
                     group.forEach(function (el, idx) {
                         if (!el.storeTransform) el.storeTransform = copyObj(defsCopyLocal[configIndex].storeValueAnim.transform);
                         if (!el.storeColor) {
@@ -325,16 +355,19 @@
                             });
                         }
 
+                        // Start staggered animations if timeline offset exists
                         if (conf.timeline !== 0) {
                             frameRunner([el], idx, conf.timeline * idx + conf.startafter, conf.startafter);
                         }
                     });
 
+                    // Start simultaneous animations
                     if (conf.timeline === 0) {
                         frameRunner(group, 0, 0 + conf.startafter, conf.startafter);
                     }
 
                     function frameRunner(targetArray, idx, timeOffset, startAfter) {
+                        // Manage animation frame cycles
                         if (conf.animFram) cancelAnimationFrame(conf.animFram[idx]);
                         else conf.animFram = {};
 
@@ -346,6 +379,7 @@
                         let skipCounter;
                         const sv = iterConf.storeValueAnim;
 
+                        // The main animation loop using requestAnimationFrame
                         function loop() {
                             if (isPaused) {
                                 conf.animFram[idx] = requestAnimationFrame(loop);
@@ -357,6 +391,7 @@
                             const elapsed = Date.now() - (startedAt + timeOffset + pausedAccum);
 
                             if (elapsed >= 0) {
+                                // Logic for handling loops, delays, and reversing (yoyo) animations
                                 if (iterConf.boucle) {
                                     if (iterConf.delay !== undefined) {
                                         delay = iterConf.delay;
@@ -398,7 +433,9 @@
                                     iterConf.timeEasing = elapsed < iterConf.duration ? elapsed : iterConf.duration;
                                 }
 
+                                // Update properties if not in delay phase
                                 if (!iterConf.skipDelay || iterConf.skip) {
+                                    // Calculate ease factor (0 to 1)
                                     eased = Easing[iterConf.changetypeAnim][0](iterConf.timeEasing, 0, 1, iterConf.duration, iterConf, idx);
 
                                     if (iterConf.callback) {
@@ -406,6 +443,7 @@
                                             iterConf.callback(el, eased, iterConf, idx !== index ? idx : index);
                                         });
                                     } else {
+                                        // Apply styles: Transform, Color, or standard Numeric properties
                                         iterConf.property.forEach(function (prop) {
                                             css = "";
                                             let key = typeof prop === "string" ? prop : Object.keys(prop)[0];
@@ -444,6 +482,7 @@
                                 }
                             }
 
+                            // Continue the loop if animation is still active or looping
                             if (iterConf.boucle || elapsed < iterConf.duration) {
                                 conf.animFram[idx] = requestAnimationFrame(loop);
                             }
@@ -757,8 +796,17 @@
         else return el.style[cssprop];
     }
 
+    // --- Robust DOM Element Validation ---
     function isElement(element) {
-        return element instanceof Element || element instanceof HTMLDocument;
+        try {
+            // Check for standard DOM Element or HTMLDocument
+            return element instanceof Element || element instanceof HTMLDocument;
+        } catch (e) {
+            // Fallback for environments where Element is not defined
+            return (typeof element === "object") && 
+                   (element.nodeType === 1) && 
+                   (typeof element.nodeName === "string");
+        }
     }
 
     const copyObj = function(obj) {

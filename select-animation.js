@@ -101,36 +101,46 @@
     // Usage: select('.class', '#id')
     // -----------------------------
     // --- Enhanced DOM Selection Utility with Explicit Error Reporting ---
-    const selectDom = function (selector) {
-        // 1. Check if the input is a DOM element directly
-        if (isElement(selector)) return [selector];
+    // --- Enhanced DOM Selection Utility (Supports Multiple Arguments) ---
+    const selectDom = function (...selectors) {
+        const allElements = [];
 
-        // 2. Handle string selectors (e.g., ".class", "#id")
-        if (typeof selector === "string") {
-            const nodes = document.querySelectorAll(selector);
-            if (nodes.length === 0) {
-                // Warning if the selector is valid string but matches nothing
-                console.warn(`Select-Animation: No elements found matching the selector "${selector}".`);
+        // If no arguments were passed at all
+        if (selectors.length === 0) {
+            console.warn("Select-Animation: selectDom() was called without any arguments.");
+            return [];
+        }
+
+        selectors.forEach((selector) => {
+            // 1. If the argument is already a DOM element
+            if (isElement(selector)) {
+                allElements.push(selector);
+            } 
+            // 2. If the argument is a string (Selector)
+            else if (typeof selector === "string") {
+                const nodes = document.querySelectorAll(selector);
+                if (nodes.length === 0) {
+                    console.warn(`Select-Animation: No elements found for selector "${selector}".`);
+                } else {
+                    // Spread the NodeList into our results array
+                    allElements.push(...Array.from(nodes));
+                }
+            } 
+            // 3. If the argument is an array or collection
+            else if (Array.isArray(selector) || (selector && typeof selector.length === "number")) {
+                const filtered = Array.from(selector).filter(isElement);
+                allElements.push(...filtered);
+            } 
+            // 4. INVALID INPUT: Alert the developer if they passed a number/null/etc.
+            else if (selector !== undefined && selector !== null) {
+                console.error(
+                    `Select-Animation ERROR: Invalid selector type "${typeof selector}". ` +
+                    `Expected String, Element, or Array, but received:`, selector
+                );
             }
-            return Array.from(nodes);
-        }
+        });
 
-        // 3. Handle arrays or collections
-        if (Array.isArray(selector) || (selector && typeof selector.length === "number")) {
-            return Array.from(selector).filter(isElement);
-        }
-
-        // 4. CRITICAL: Handle invalid types (like numbers, null, undefined)
-        if (selector !== undefined && selector !== null) {
-            // Throwing a console error to stop the developer and force a fix
-            console.error(
-                `Select-Animation ERROR: Invalid input passed to selectDom().\n` +
-                `Expected: String (selector), HTMLElement, or Array.\n` +
-                `Received: ${typeof selector} (${selector})`
-            );
-        }
-
-        return [];
+        return allElements;
     };
 
     // -----------------------------
@@ -139,7 +149,7 @@
     // -----------------------------
     const animate = function () {
         const definitions = arguments;
-        const defsCopy = copyObj(definitions);
+        const defsCopy = copyObj(Array.prototype.slice.call(definitions));
 
         return function () {
             let tmp, i, propIndex, fromItem, toItem, valFrom, valTo, t;
@@ -185,7 +195,7 @@
                                     defsCopy[c].typeAnimation = "cubicbezier";
                                 } else {
                                     // STOP EXECUTION: If easing is not found, do not fall back to linear
-                                    if (requestedType !== "linear" && requestedType !== "vibration" && requestedType !== "cubicbezier" && (!global.selectAnimationEase || !global.selectAnimationEase[requestedType])) {
+                                    if (requestedType !== "linear" && requestedType !== "vibration" && requestedType !== "cubicbezier" && (!Easing || !Easing[requestedType])) {
                                         // Use Error instead of warn to make it impossible to ignore
                                         throw new Error(`Select-Animation ERROR: The easing function "${requestedType}" does not exist. Please check your spelling or definitions.`);
                                     }
@@ -837,6 +847,8 @@
         }
         return ret;
     };
+
+
 
     // Expose both for browser and Node/npm consumers
     if (typeof module !== 'undefined' && module.exports) {
